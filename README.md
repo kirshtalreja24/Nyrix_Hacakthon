@@ -15,12 +15,11 @@
 6. **Executive Summary** — standing multi-branch synthesis panel visible on load
 
 ### Bonus Features
-7. **Cross-Source Queries** — single NL question can pull from both CSV and PostgreSQL in one answer (via DuckDB `postgres_scanner`)
-8. **Proactive Anomaly Detection** — automatically surfaces anomalies on data load without user asking
-9. **Conversational Follow-ups** — retains context across questions (e.g. "that branch", "there", "it")
-10. **Exportable PDF Reports** — per branch or all locations, with charts, executive summary, and anomalies
-11. **Data Preview** — shows column types, row count, and sample data after upload/connect
-12. **Remove/Disconnect** — clear uploaded CSV or disconnect PostgreSQL to switch data sources anytime
+7. **Proactive Anomaly Detection** — automatically surfaces anomalies on data load without user asking
+8. **Conversational Follow-ups** — retains context across questions (e.g. "that branch", "there", "it")
+9. **Exportable PDF Reports** — per branch or all locations, with charts, executive summary, and anomalies
+10. **Data Preview** — shows column types, row count, and sample data after upload/connect
+11. **Remove/Disconnect** — clear uploaded CSV or disconnect PostgreSQL to switch data sources anytime
 
 ### Supported Chart Types
 | Chart | When Used |
