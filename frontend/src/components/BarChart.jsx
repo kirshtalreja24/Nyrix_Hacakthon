@@ -9,6 +9,7 @@ import {
   Cell,
 } from 'recharts';
 
+
 const PALETTE = ['#111111', '#787774', '#C4C0BA', '#E1F3FE', '#FDEBEC', '#EDF3EC', '#FBF3DB'];
 
 export default function BarChart({ data, insight, title }) {

@@ -9,6 +9,7 @@ export default function KpiCard({ data, insight }) {
     typeof row[k] === 'number'
   );
 
+  
   return (
     <div ref={ref} className="scroll-entry">
       <div className="bg-surface border border-border rounded-card p-8">

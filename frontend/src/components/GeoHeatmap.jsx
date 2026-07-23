@@ -28,6 +28,7 @@ export default function GeoHeatmap({ data, insight, title }) {
     return `rgb(${r}, ${g}, ${b})`;
   }
 
+
   function getTextColor(val) {
     const t = (val - minVal) / range;
     return t > 0.6 ? '#FFFFFF' : '#111111';
