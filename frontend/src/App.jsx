@@ -3,6 +3,7 @@ import { getStatus, uploadCSV, connectPostgres, runQuery, getExecutiveSummary } 
 import ExecutiveSummary from './components/ExecutiveSummary';
 import QueryBox from './components/queryBox';
 import ResultFeed from './components/ResultFeed';
+import PostgresModal from './components/PostgresModal';
 
 export default function App() {
   const [sourceStatus, setSourceStatus] = useState(null);
@@ -12,6 +13,9 @@ export default function App() {
   const [queryLoading, setQueryLoading] = useState(false);
   const [error, setError] = useState(null);
   const [uploadStatus, setUploadStatus] = useState(null);
+  const [postgresModalOpen, setPostgresModalOpen] = useState(false);
+  const [postgresConnecting, setPostgresConnecting] = useState(false);
+  const [postgresError, setPostgresError] = useState(null);
 
   // Initial status check
   useEffect(() => {
@@ -43,16 +47,23 @@ export default function App() {
     }
   };
 
-  const handlePostgresConnect = async () => {
-    setUploadStatus('loading');
+  const handlePostgresConnect = async (config) => {
+    setPostgresConnecting(true);
+    setPostgresError(null);
     try {
-      const result = await connectPostgres({});
+      const result = await connectPostgres(config);
+      if (result.connected === false) {
+        setPostgresError(result.error || result.hint || 'Connection failed');
+        return;
+      }
+      setPostgresModalOpen(false);
       setUploadStatus('success');
       checkStatus();
       refreshSummary();
     } catch (err) {
-      setUploadStatus('error');
-      setError(err.message);
+      setPostgresError(err.message);
+    } finally {
+      setPostgresConnecting(false);
     }
   };
 
@@ -145,8 +156,12 @@ export default function App() {
                   <p className="text-sm font-sans font-medium text-text-primary">CSV / Excel Upload</p>
                   <p className="text-xs text-text-muted mt-0.5">
                     {sourceStatus?.csv?.loaded
-                      ? `${sourceStatus.csv.orders_rows || 0} rows loaded`
-                      : 'Upload orders.csv or footfall.csv'}
+                      ? (() => {
+                          const tables = Object.keys(sourceStatus.csv).filter(k => k.endsWith('_rows'));
+                          const totalRows = tables.reduce((sum, k) => sum + (sourceStatus.csv[k] || 0), 0);
+                          return `${totalRows.toLocaleString()} rows loaded`;
+                        })()
+                      : 'Upload any CSV file'}
                   </p>
                 </div>
                 <label className="cursor-pointer flex-shrink-0">
@@ -171,12 +186,16 @@ export default function App() {
                   <p className="text-sm font-sans font-medium text-text-primary">PostgreSQL Database</p>
                   <p className="text-xs text-text-muted mt-0.5">
                     {sourceStatus?.postgres?.connected
-                      ? `${sourceStatus.postgres.orders_rows || 0} orders, ${sourceStatus.postgres.footfall_rows || 0} footfall`
+                      ? (() => {
+                          const tables = Object.keys(sourceStatus.postgres).filter(k => k.endsWith('_rows'));
+                          const totalRows = tables.reduce((sum, k) => sum + (sourceStatus.postgres[k] || 0), 0);
+                          return `${tables.length} table${tables.length !== 1 ? 's' : ''}, ${totalRows.toLocaleString()} rows`;
+                        })()
                       : 'Connect to a live PostgreSQL instance'}
                   </p>
                 </div>
                 <button
-                  onClick={handlePostgresConnect}
+                  onClick={() => setPostgresModalOpen(true)}
                   disabled={uploadStatus === 'loading'}
                   className="text-xs font-sans uppercase tracking-wider px-3 py-2 rounded-card
                     border border-border text-text-secondary hover:text-text-primary hover:border-text-primary/30 transition-all
@@ -237,6 +256,15 @@ export default function App() {
           </div>
         </footer>
       </div>
+
+      {/* PostgreSQL Connection Modal */}
+      <PostgresModal
+        open={postgresModalOpen}
+        onClose={() => { setPostgresModalOpen(false); setPostgresError(null); }}
+        onConnect={handlePostgresConnect}
+        loading={postgresConnecting}
+        error={postgresError}
+      />
     </div>
   );
 }
