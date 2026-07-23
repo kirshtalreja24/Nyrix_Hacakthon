@@ -1,5 +1,6 @@
 """
 Deterministic chart-type selection rule engine (no LLM involved).
+Auto-detects column roles by name AND dtype for maximum compatibility.
 """
 
 import pandas as pd
@@ -8,58 +9,92 @@ import pandas as pd
 def select_chart(question: str, result_df: pd.DataFrame, query_spec: dict = None) -> dict:
     """
     Pure-code classifier to determine chart type from result shape and question intent.
-
     Returns dict with 'chart_type' and optional 'params'.
     """
-    n_rows = len(result_df)
-    has_time_col = any(col in result_df.columns for col in ["date", "week_start", "month", "year"])
-    has_geo_col = "city" in result_df.columns
-    entity_col = "branch" if "branch" in result_df.columns else None
+
+    # ── Column role detection (flexible — by name AND dtype) ──────────────
+
+    # Time columns — check both known names and datetime dtype
+    TIME_NAMES = {"date", "week_start", "month", "year", "day", "week", "timestamp", "period", "quarter"}
+    has_time_col = False
+    for col in result_df.columns:
+        if col.lower() in TIME_NAMES:
+            has_time_col = True
+            break
+        if pd.api.types.is_datetime64_any_dtype(result_df[col]):
+            has_time_col = True
+            break
+
+    # Geo columns
+    GEO_NAMES = {"city", "state", "province", "region", "country", "area", "zone"}
+    geo_col = None
+    for col in result_df.columns:
+        if col.lower() in GEO_NAMES:
+            geo_col = col
+            break
+
+    # Entity columns (grouping columns)
+    ENTITY_NAMES = {"branch", "store", "location", "outlet", "department", "team",
+                    "item", "product", "category", "segment", "type", "class", "name"}
+    entity_col = None
+    for col in result_df.columns:
+        if col.lower() in ENTITY_NAMES:
+            entity_col = col
+            break
+
     n_metric_cols = len([c for c in result_df.columns if pd.api.types.is_numeric_dtype(result_df[c])])
 
-    q = question.lower()
-    wants_share = any(w in q for w in ["share", "percentage", "%", "proportion", "distribution"])
-    wants_rank = any(w in q for w in ["top", "lowest", "highest", "compare", "rank", "which"])
-    wants_trend = any(w in q for w in ["trend", "over time", "trajectory", "change over"])
+    # Detect percentage/share columns in result data
+    share_col = None
+    for col in result_df.columns:
+        cl = col.lower()
+        if any(kw in cl for kw in ["share", "pct", "percentage", "proportion", "distribution", "ratio"]):
+            share_col = col
+            break
 
-    # Edge case: empty result
+    n_rows = len(result_df)
+    q = question.lower()
+
+    wants_share = any(w in q for w in ["share", "percentage", "%", "proportion", "distribution", "breakdown"])
+    wants_rank = any(w in q for w in ["top", "lowest", "highest", "compare", "rank", "which", "worst", "best"])
+    wants_trend = any(w in q for w in ["trend", "over time", "trajectory", "change over", "time series", "daily", "weekly", "monthly"])
+
+
+    # ── Decision logic ────────────────────────────────────────────────────
+
+    # Empty result
     if n_rows == 0:
         return {"chart_type": "empty", "params": {}}
 
-    # Single row, single metric → KPI scorecard
+    # Single row, ≤2 metrics → KPI scorecard
     if n_rows == 1 and n_metric_cols <= 2:
         return {"chart_type": "kpi_scorecard", "params": {}}
 
-    # Trend over time → line chart (even if many entities)
-    if wants_trend and has_time_col:
-        return {"chart_type": "line", "params": {"time_col": "date" if "date" in result_df.columns else "week_start"}}
-
-    # Time series with few entities → line
-    if has_time_col:
-        n_entities = result_df[entity_col].nunique() if entity_col else 1
-        if n_entities <= 3:
-            return {"chart_type": "line", "params": {"time_col": "date" if "date" in result_df.columns else "week_start"}}
-        else:
-            # Many entities over time → line chart with multiple lines
-            return {"chart_type": "line", "params": {"time_col": "date" if "date" in result_df.columns else "week_start"}}
-
-    # Geo + entity comparison → heatmap grid
-    if has_geo_col and entity_col and n_rows > 1 and not wants_share:
-        return {"chart_type": "geo_heatmap", "params": {}}
-
-    # Share/proportion → pie
-    if wants_share and entity_col:
+    # Share/proportion: keyword in question OR share column in result → pie
+    if (wants_share or share_col) and entity_col and n_rows > 1:
         return {"chart_type": "pie", "params": {}}
 
-    # Ranking or comparison with 2+ metrics → ranked table
+    # Trend explicit keyword → line (even without time col detected)
+    if wants_trend and has_time_col:
+        return {"chart_type": "line", "params": {}}
+
+    # Any time column → line chart
+    if has_time_col:
+        return {"chart_type": "line", "params": {}}
+
+    # Geo + entity → heatmap grid
+    if geo_col and entity_col and n_rows > 1:
+        return {"chart_type": "geo_heatmap", "params": {}}
+
+    # 2+ metrics per entity → ranked table
     if entity_col and n_metric_cols >= 2:
         return {"chart_type": "ranked_table", "params": {}}
 
-    # Entity with single metric → bar
+    # Entity with single metric → bar chart
     if entity_col and n_metric_cols == 1:
         return {"chart_type": "bar", "params": {}}
 
-    # Categorical → bar
+    # Categorical with single metric → bar
     if n_metric_cols == 1 and n_rows <= 20:
         return {"chart_type": "bar", "params": {}}
 

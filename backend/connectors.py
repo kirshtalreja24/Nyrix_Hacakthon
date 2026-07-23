@@ -1,10 +1,12 @@
 """
 Connectors — CSV/DuckDB (Connector A) and PostgreSQL (Connector B).
 Both normalize into the same DataFrame shape for downstream processing.
+Cross-source queries via DuckDB postgres_scanner.
 """
 
 import os
 import io
+import logging
 from urllib.parse import quote_plus
 import pandas as pd
 import duckdb
@@ -13,6 +15,7 @@ from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 
 load_dotenv()
+log = logging.getLogger("connectors")
 
 
 # ─── Connector A: CSV → DuckDB (in-memory) ───────────────────────────────────
@@ -50,16 +53,16 @@ class CSVConnector:
                     df[col] = df[col].clip(lower=0)
                     cleaning_notes.append(f"Clamped {neg_count} negative values in '{col}' to 0")
 
-        # Handle date columns — try to parse any column with date/time in name
+        # Handle date columns
         for col in df.columns:
             col_lower = col.lower()
             if any(kw in col_lower for kw in ("date", "time", "_at", "week")):
                 try:
                     df[col] = pd.to_datetime(df[col])
                 except Exception:
-                    pass  # leave as-is if parsing fails
+                    pass
 
-        # Handle string columns — strip whitespace, fill empty strings
+        # Handle string columns
         for col in df.columns:
             if pd.api.types.is_object_dtype(df[col]):
                 df[col] = df[col].astype(str).str.strip().replace("nan", "")
@@ -67,13 +70,11 @@ class CSVConnector:
                     df[col] = df[col].fillna("")
 
         # Auto-detect date columns among remaining string columns
-        # Sample a few values to check if they look like dates
         for col in df.columns:
             if pd.api.types.is_object_dtype(df[col]) or pd.api.types.is_string_dtype(df[col]):
                 sample = df[col].dropna().head(20)
                 if len(sample) == 0:
                     continue
-                # Check if values match common date patterns (YYYY-MM-DD, MM/DD/YYYY, etc.)
                 date_like = sample.astype(str).str.match(
                     r'^\d{2,4}[/-]\d{1,2}[/-]\d{2,4}(\s\d{1,2}:\d{2})?$'
                 ).sum()
@@ -95,6 +96,44 @@ class CSVConnector:
             "columns": list(df.columns),
             "cleaning": cleaning_notes if cleaning_notes else ["No cleaning needed"],
         }
+
+    def attach_postgres(self, host: str, port: str, db: str, user: str, password: str) -> dict:
+        """
+        Attach a Postgres database into DuckDB via postgres_scanner extension.
+        This enables cross-source queries joining CSV + Postgres data in a single SQL statement.
+        """
+        try:
+            # Install and load the postgres_scanner extension
+            self.conn.execute("INSTALL postgres; LOAD postgres;")
+
+            # Build the connection string for DuckDB's postgres_scanner
+            conn_str = f"postgresql://{user}:{quote_plus(password)}@{host}:{port}/{db}?sslmode=require"
+
+            # ATTACH the Postgres database — tables become queryable as "pg_tablename"
+            self.conn.execute(f"ATTACH '{conn_str}' AS pg (TYPE postgres)")
+
+            log.info("Postgres attached to DuckDB via postgres_scanner: %s/%s", host, db)
+            return {"attached": True}
+        except Exception as e:
+            log.warning("Failed to attach Postgres to DuckDB: %s", e)
+            return {"attached": False, "error": str(e)}
+
+    def detach_postgres(self):
+        """Detach the Postgres database from DuckDB."""
+        try:
+            self.conn.execute("DETACH pg")
+        except Exception:
+            pass
+
+    def clear(self):
+        """Clear all loaded CSV data and reset DuckDB."""
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+        self.conn = duckdb.connect(":memory:")
+        self.tables = {}
+        self._loaded = False
 
     def query(self, sql: str) -> pd.DataFrame:
         """Execute SQL against the in-memory DuckDB."""
@@ -133,7 +172,7 @@ class PostgresConnector:
         self.db = os.getenv("POSTGRES_DB", "business_analytics")
         self.user = os.getenv("POSTGRES_USER", "postgres")
         self.password = os.getenv("POSTGRES_PASSWORD", "")
-        self.tables = []  # discovered table names
+        self.tables = []
 
     def connect(self) -> dict:
         """Test and establish Postgres connection, discover all tables."""
@@ -141,7 +180,6 @@ class PostgresConnector:
             url = f"postgresql://{self.user}:{quote_plus(self.password)}@{self.host}:{self.port}/{self.db}?sslmode=require"
             self.engine = create_engine(url, pool_pre_ping=True)
 
-            # Discover all user tables in the database
             with self.engine.connect() as conn:
                 result = conn.execute(text(
                     "SELECT table_name FROM information_schema.tables "
@@ -159,7 +197,6 @@ class PostgresConnector:
                     "warning": "Connected but no tables found in the database.",
                 }
 
-            # Get row counts for each discovered table
             table_info = {}
             with self.engine.connect() as conn:
                 for table_name in self.tables:
@@ -180,6 +217,17 @@ class PostgresConnector:
         except Exception as e:
             self._connected = False
             return {"connected": False, "error": str(e)}
+
+    def disconnect(self):
+        """Disconnect from PostgreSQL."""
+        if self.engine:
+            try:
+                self.engine.dispose()
+            except Exception:
+                pass
+        self.engine = None
+        self._connected = False
+        self.tables = []
 
     def query(self, sql: str) -> pd.DataFrame:
         """Execute SQL against PostgreSQL."""
@@ -236,6 +284,25 @@ class UnifiedSource:
     def __init__(self):
         self.csv = CSVConnector()
         self.postgres = PostgresConnector()
+        self._postgres_attached = False
+
+    def attach_postgres_for_cross_source(self):
+        """Attach Postgres into DuckDB for cross-source queries."""
+        if not self.postgres._connected:
+            return {"attached": False, "error": "PostgreSQL not connected."}
+        if self._postgres_attached:
+            return {"attached": True}
+        result = self.csv.attach_postgres(
+            self.postgres.host, self.postgres.port,
+            self.postgres.db, self.postgres.user, self.postgres.password
+        )
+        if result.get("attached"):
+            self._postgres_attached = True
+        return result
+
+    def query_cross_source(self, sql: str) -> pd.DataFrame:
+        """Execute a cross-source query against DuckDB with Postgres attached."""
+        return self.csv.query(sql)
 
     def get_active_connector(self):
         """Return whichever connector is available, preferring CSV if both loaded."""
@@ -252,6 +319,16 @@ class UnifiedSource:
         if self.postgres._connected:
             parts.append(f"[PostgreSQL]\n{self.postgres.get_schema()}")
         return "\n\n".join(parts) if parts else "No data sources connected."
+
+    def clear_csv(self):
+        """Clear CSV data source."""
+        self.csv.clear()
+        return {"cleared": True}
+
+    def disconnect_postgres(self):
+        """Disconnect PostgreSQL."""
+        self.postgres.disconnect()
+        return {"disconnected": True}
 
     def status(self) -> dict:
         return {

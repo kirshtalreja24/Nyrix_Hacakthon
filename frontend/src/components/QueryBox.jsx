@@ -9,25 +9,44 @@ const EXAMPLES = [
   'Flag any branch where footfall dropped more than 20% week-over-week.',
 ];
 
-export default function QueryBox({ onSubmit, loading, disabled }) {
+const FOLLOW_UP_EXAMPLES = [
+  '...and what about footfall there?',
+  'How does that compare to last week?',
+  'Show me the trend for that branch.',
+  'What\'s the top item there?',
+  'Which other branches have similar patterns?',
+  'Compare it to LHR-01.',
+];
+
+export default function QueryBox({ onSubmit, loading, disabled, hasResults, suggestions = [] }) {
   const [value, setValue] = useState('');
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!value.trim() || loading) return;
     onSubmit(value.trim());
+    setValue('');
   }
 
   function handleExampleClick(q) {
-    setValue(q);
     onSubmit(q);
   }
 
   return (
     <div>
+      {/* Conversation hint — only shows when results exist */}
+      {hasResults && !loading && (
+        <div className="mb-3 flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-pale-green-text animate-pulse" />
+          <p className="text-xs text-text-muted font-sans">
+            Ask a follow-up — references like "that branch", "there", or "it" will resolve automatically
+          </p>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="relative">
         <div className="bg-surface border border-border rounded-card overflow-hidden
-          transition-all focus-within:border-text-primary/30">
+          transition-all focus-within:border-text-primary/30 shadow-subtle">
           <textarea
             value={value}
             onChange={e => setValue(e.target.value)}
@@ -37,7 +56,7 @@ export default function QueryBox({ onSubmit, loading, disabled }) {
                 handleSubmit(e);
               }
             }}
-            placeholder="Ask a question about your business data..."
+            placeholder={hasResults ? 'Ask a follow-up question...' : 'Ask a question about your business data...'}
             disabled={disabled || loading}
             rows={2}
             className="w-full px-6 py-4 text-sm font-sans bg-transparent resize-none
@@ -61,9 +80,9 @@ export default function QueryBox({ onSubmit, loading, disabled }) {
         </div>
       </form>
 
-      {/* Example queries */}
+      {/* Example queries — show different set based on whether there are results */}
       <div className="mt-4 flex flex-wrap gap-2">
-        {EXAMPLES.map((q, i) => (
+        {(suggestions.length > 0 ? suggestions : (hasResults ? FOLLOW_UP_EXAMPLES : EXAMPLES)).map((q, i) => (
           <button
             key={i}
             onClick={() => handleExampleClick(q)}

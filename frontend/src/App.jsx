@@ -1,9 +1,16 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getStatus, uploadCSV, connectPostgres, runQuery, getExecutiveSummary } from './lib/api';
+import { useState, useEffect } from 'react';
+import { getStatus, uploadCSV, connectPostgres, runQuery, getExecutiveSummary, getSuggestions, clearCSV, disconnectPostgres } from './lib/api';
 import ExecutiveSummary from './components/ExecutiveSummary';
-import QueryBox from './components/queryBox';
+import QueryBox from './components/QueryBox';
 import ResultFeed from './components/ResultFeed';
 import PostgresModal from './components/PostgresModal';
+import DataPreview from './components/DataPreview';
+import AnomalyBanner from './components/AnomalyBanner';
+import ExportButton from './components/ExportButton';
+
+function generateSessionId() {
+  return 'session_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now();
+}
 
 export default function App() {
   const [sourceStatus, setSourceStatus] = useState(null);
@@ -16,11 +23,27 @@ export default function App() {
   const [postgresModalOpen, setPostgresModalOpen] = useState(false);
   const [postgresConnecting, setPostgresConnecting] = useState(false);
   const [postgresError, setPostgresError] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewSource, setPreviewSource] = useState('csv');
+  const [sessionId] = useState(() => generateSessionId());
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
 
-  // Initial status check
+  const isDataReady = sourceStatus &&
+    ((sourceStatus.csv && sourceStatus.csv.loaded) ||
+     (sourceStatus.postgres && sourceStatus.postgres.connected));
+
   useEffect(() => {
     checkStatus();
   }, []);
+
+  useEffect(() => {
+    if (isDataReady) {
+      loadSuggestions();
+    } else {
+      setSuggestions([]);
+    }
+  }, [isDataReady, results.length]);
 
   const checkStatus = async () => {
     try {
@@ -39,8 +62,8 @@ export default function App() {
       const result = await uploadCSV(file);
       setUploadStatus('success');
       checkStatus();
-      // Auto-refresh executive summary after upload
-      refreshSummary();
+      setPreviewSource('csv');
+      setPreviewOpen(true);
     } catch (err) {
       setUploadStatus('error');
       setError(err.message);
@@ -59,12 +82,17 @@ export default function App() {
       setPostgresModalOpen(false);
       setUploadStatus('success');
       checkStatus();
-      refreshSummary();
+      setPreviewSource('postgres');
+      setPreviewOpen(true);
     } catch (err) {
       setPostgresError(err.message);
     } finally {
       setPostgresConnecting(false);
     }
+  };
+
+  const handlePreviewConfirm = () => {
+    refreshSummary();
   };
 
   const refreshSummary = async () => {
@@ -79,11 +107,43 @@ export default function App() {
     }
   };
 
+  const loadSuggestions = async () => {
+    setSuggestionsLoading(true);
+    try {
+      const res = await getSuggestions(results.length > 0 ? sessionId : null);
+      setSuggestions(res.suggestions || []);
+    } catch (err) {
+      console.error('Failed to load suggestions:', err);
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  };
+
+  const handleClearCSV = async () => {
+    try {
+      await clearCSV();
+      checkStatus();
+      setResults([]);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleDisconnectPostgres = async () => {
+    try {
+      await disconnectPostgres();
+      checkStatus();
+      setResults([]);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const handleQuery = async (question) => {
     setQueryLoading(true);
     setError(null);
     try {
-      const result = await runQuery(question);
+      const result = await runQuery(question, sessionId);
       setResults(prev => [...prev, result]);
     } catch (err) {
       setError(err.message);
@@ -92,9 +152,10 @@ export default function App() {
     }
   };
 
-  const isDataReady = sourceStatus &&
-    ((sourceStatus.csv && sourceStatus.csv.loaded) ||
-     (sourceStatus.postgres && sourceStatus.postgres.connected));
+
+  const allBranches = [...new Set(
+    results.flatMap(r => (r.chart_data || []).map(d => d.branch).filter(Boolean))
+  )];
 
   return (
     <div className="min-h-screen bg-canvas">
@@ -106,29 +167,29 @@ export default function App() {
         }}
       />
 
-      <div className="relative max-w-5xl mx-auto px-6 py-16 md:py-24">
-        {/* Header */}
-        <header className="mb-16">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-8 h-8 rounded-card bg-text-primary flex items-center justify-center">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      {/* Navbar */}
+      <nav className="relative border-b border-border bg-surface/80 backdrop-blur-sm sticky top-0 z-30">
+        <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-7 h-7 rounded-card bg-text-primary flex items-center justify-center">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 3v18h18"/>
                 <path d="M7 16l4-5 4 3 4-6"/>
               </svg>
             </div>
-            <h1 className="text-2xl md:text-3xl font-editorial tracking-tight text-text-primary">
+            <span className="text-lg font-editorial tracking-tight text-text-primary">
               Nyrix Analytics
-            </h1>
+            </span>
           </div>
-          <p className="text-sm text-text-secondary max-w-2xl leading-relaxed">
-            Connect your business data and ask questions in plain English.
-            Get back the right chart, a grounded insight, and a standing Executive Summary
-            across all your branches.
-          </p>
-        </header>
+          <div className="flex items-center gap-3">
+            {isDataReady && <ExportButton branchNames={allBranches} />}
+          </div>
+        </div>
+      </nav>
 
+      <div className="relative max-w-5xl mx-auto px-6 py-10 md:py-16">
         {/* Data Sources Bar */}
-        <section className="mb-10">
+        <section className="mb-8">
           <div className="bg-surface border border-border rounded-card p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xs font-sans uppercase tracking-widest text-text-secondary">
@@ -164,13 +225,25 @@ export default function App() {
                       : 'Upload any CSV file'}
                   </p>
                 </div>
-                <label className="cursor-pointer flex-shrink-0">
-                  <input type="file" accept=".csv,.xlsx" className="hidden" onChange={handleCSVUpload} />
-                  <span className="text-xs font-sans uppercase tracking-wider px-3 py-2 rounded-card
-                    border border-border text-text-secondary hover:text-text-primary hover:border-text-primary/30 transition-all">
-                    Upload
-                  </span>
-                </label>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <label className="cursor-pointer">
+                    <input type="file" accept=".csv,.xlsx" className="hidden" onChange={handleCSVUpload} />
+                    <span className="text-xs font-sans uppercase tracking-wider px-3 py-2 rounded-card
+                      border border-border text-text-secondary hover:text-text-primary hover:border-text-primary/30 transition-all">
+                      Upload
+                    </span>
+                  </label>
+                  {sourceStatus?.csv?.loaded && (
+                    <button
+                      onClick={handleClearCSV}
+                      className="text-xs font-sans uppercase tracking-wider px-2 py-2 rounded-card
+                        border border-pale-red-text/20 text-pale-red-text hover:bg-pale-red
+                        transition-all flex-shrink-0"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* PostgreSQL */}
@@ -194,19 +267,34 @@ export default function App() {
                       : 'Connect to a live PostgreSQL instance'}
                   </p>
                 </div>
-                <button
-                  onClick={() => setPostgresModalOpen(true)}
-                  disabled={uploadStatus === 'loading'}
-                  className="text-xs font-sans uppercase tracking-wider px-3 py-2 rounded-card
-                    border border-border text-text-secondary hover:text-text-primary hover:border-text-primary/30 transition-all
-                    disabled:opacity-40 flex-shrink-0"
-                >
-                  Connect
-                </button>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => setPostgresModalOpen(true)}
+                    disabled={uploadStatus === 'loading'}
+                    className="text-xs font-sans uppercase tracking-wider px-3 py-2 rounded-card
+                      border border-border text-text-secondary hover:text-text-primary hover:border-text-primary/30 transition-all
+                      disabled:opacity-40 flex-shrink-0"
+                  >
+                    Connect
+                  </button>
+                  {sourceStatus?.postgres?.connected && (
+                    <button
+                      onClick={handleDisconnectPostgres}
+                      className="text-xs font-sans uppercase tracking-wider px-2 py-2 rounded-card
+                        border border-pale-red-text/20 text-pale-red-text hover:bg-pale-red
+                        transition-all flex-shrink-0"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         </section>
+
+        {/* Anomaly Banner */}
+        <AnomalyBanner isDataReady={isDataReady} />
 
         {/* Error Banner */}
         {error && (
@@ -226,7 +314,7 @@ export default function App() {
         )}
 
         {/* Executive Summary */}
-        <section className="mb-10">
+        <section className="mb-8">
           <ExecutiveSummary
             data={executiveSummary}
             loading={execSummaryLoading}
@@ -235,11 +323,13 @@ export default function App() {
         </section>
 
         {/* Query Box */}
-        <section className="mb-10">
+        <section className="mb-8">
           <QueryBox
             onSubmit={handleQuery}
-            loading={queryLoading}
+            loading={queryLoading || suggestionsLoading}
             disabled={!isDataReady}
+            hasResults={results.length > 0}
+            suggestions={suggestions}
           />
         </section>
 
@@ -249,7 +339,7 @@ export default function App() {
         </section>
 
         {/* Footer */}
-        <footer className="mt-24 pt-8 border-t border-border">
+        <footer className="mt-20 pt-8 border-t border-border">
           <div className="flex items-center justify-between text-xs text-text-muted font-mono">
             <span>Nyrix Analytics v1.0</span>
             <span>Business Analytics Assistant</span>
@@ -264,6 +354,14 @@ export default function App() {
         onConnect={handlePostgresConnect}
         loading={postgresConnecting}
         error={postgresError}
+      />
+
+      {/* Data Preview Modal */}
+      <DataPreview
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        sourceType={previewSource}
+        onConfirm={handlePreviewConfirm}
       />
     </div>
   );

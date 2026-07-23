@@ -27,16 +27,26 @@ export default function ResultFeed({ results }) {
   if (results.length === 0) return null;
 
   return (
-    <div className="space-y-6">
-      {results.map((r, i) => (
-        <ResultCard key={i} result={r} index={i} />
-      ))}
+    <div className="relative">
+      {/* Vertical conversation thread line */}
+      <div className="absolute left-[21px] top-0 bottom-0 w-px bg-border/60" />
+
+      <div className="space-y-0">
+        {results.map((r, i) => (
+          <ResultCard
+            key={i}
+            result={r}
+            index={i}
+            isFollowUp={i > 0}
+          />
+        ))}
+      </div>
       <div ref={bottomRef} />
     </div>
   );
 }
 
-function ResultCard({ result, index }) {
+function ResultCard({ result, index, isFollowUp }) {
   const ChartComponent = CHART_COMPONENTS[result.chart_type] || EmptyState;
 
   const props = {
@@ -45,25 +55,59 @@ function ResultCard({ result, index }) {
     title: result.question,
   };
 
+  const sourceLabel = result.source === 'cross_source' ? 'Cross-Source'
+    : result.source === 'csv_duckdb' ? 'CSV Data'
+    : 'PostgreSQL';
+
   return (
-    <div style={{ animationDelay: `${index * 80}ms` }}>
-      {/* Question chip */}
-      <div className="flex items-start gap-3 mb-3">
-        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-canvas border border-border
-          flex items-center justify-center text-xs font-mono text-text-muted">
-          {index + 1}
-        </div>
-        <div>
-          <p className="text-sm font-sans font-medium text-text-primary">{result.question}</p>
-          <p className="text-xs font-mono text-text-muted mt-0.5">
-            {result.chart_type_label} · {result.source === 'csv_duckdb' ? 'CSV Data' : 'PostgreSQL'}
+    <div
+      className="relative pl-12 pb-8 animate-fade-in"
+      style={{ animationDelay: `${index * 100}ms` }}
+    >
+      {/* Thread dot */}
+      <div className="absolute left-4 top-1 w-4 h-4 rounded-full bg-surface border-2 border-text-primary/20 z-10
+        flex items-center justify-center">
+        <div className="w-1.5 h-1.5 rounded-full bg-text-primary/40" />
+      </div>
+
+      {/* User question bubble */}
+      <div className="mb-3">
+        <div className="inline-block px-4 py-2.5 bg-canvas border border-border rounded-card
+          max-w-[85%] shadow-subtle">
+          {isFollowUp && (
+            <span className="text-[10px] font-mono text-text-muted block mb-0.5">
+              follow-up
+            </span>
+          )}
+          <p className="text-sm font-sans text-text-primary leading-snug">
+            {result.question}
           </p>
         </div>
       </div>
 
-      {/* Chart */}
-      <div className="ml-10">
-        <ChartComponent {...props} />
+      {/* Assistant answer card */}
+      <div className="animate-fade-up">
+        {/* Chart type badge */}
+        <div className="flex items-center gap-2 mb-2 ml-1">
+          <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5
+            rounded-card bg-pale-blue text-pale-blue-text">
+            {result.chart_type_label}
+          </span>
+          {result.source === 'cross_source' && (
+            <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5
+              rounded-card bg-pale-yellow text-pale-yellow-text">
+              Cross-Source
+            </span>
+          )}
+          <span className="text-[10px] font-mono text-text-muted">
+            · {sourceLabel}
+          </span>
+        </div>
+
+        {/* Chart */}
+        <div className="bg-surface border border-border rounded-card p-5 shadow-subtle">
+          <ChartComponent {...props} />
+        </div>
       </div>
     </div>
   );
