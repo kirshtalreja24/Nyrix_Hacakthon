@@ -1,0 +1,179 @@
+============================================
+  NYRIX BUSINESS ANALYTICS ASSISTANT
+  Sequential Execution Guide
+============================================
+
+REQUIREMENTS:
+  - Python 3.10+
+  - Node.js 18+
+  - An OpenAI API key
+  - (Optional) A PostgreSQL instance
+
+--------------------------------------------
+STEP 1: ENVIRONMENT SETUP
+--------------------------------------------
+
+# Copy the .env template and add your OpenAI API key
+copy backend\.env.example backend\.env
+
+# Edit backend\.env and set:
+#   OPENAI_API_KEY=sk-your-actual-key-here
+#   OPENAI_MODEL=gpt-4o-mini
+#
+# If using PostgreSQL (Connector B), also set:
+#   POSTGRES_HOST=localhost
+#   POSTGRES_PORT=5432
+#   POSTGRES_DB=business_analytics
+#   POSTGRES_USER=postgres
+#   POSTGRES_PASSWORD=your-password
+
+--------------------------------------------
+STEP 2: INSTALL PYTHON DEPENDENCIES
+--------------------------------------------
+
+cd backend
+pip install -r requirements.txt
+
+--------------------------------------------
+STEP 3: START THE BACKEND SERVER
+--------------------------------------------
+
+# From the backend directory
+python main.py
+
+# Backend runs at http://localhost:8000
+# Verify: open http://localhost:8000/docs in your browser
+#   You should see the FastAPI Swagger UI with all endpoints.
+
+--------------------------------------------
+STEP 4: INSTALL FRONTEND DEPENDENCIES (new terminal)
+--------------------------------------------
+
+cd frontend
+npm install
+
+--------------------------------------------
+STEP 5: START THE FRONTEND DEV SERVER
+--------------------------------------------
+
+npm run dev
+
+# Frontend runs at http://localhost:5173
+# It proxies /api/* requests to http://localhost:8000 automatically.
+
+--------------------------------------------
+STEP 6: LOAD YOUR DATA
+--------------------------------------------
+
+# In your browser, open http://localhost:5173
+#
+# Option A — CSV Upload (Connector A):
+#   1. Click "Upload" next to "CSV / Excel Upload"
+#   2. Select dataset/orders.csv
+#   3. Optionally repeat for dataset/footfall.csv
+#
+# Option B — PostgreSQL (Connector B):
+#   1. Ensure Postgres is running and dataset/setup_postgres.sql has been executed
+#   2. Run: psql -h <host> -U <user> -d <db> -f dataset/setup_postgres.sql
+#   3. Load data:
+#        \copy orders FROM 'dataset/orders.csv' WITH (FORMAT csv, HEADER true)
+#        \copy footfall FROM 'dataset/footfall.csv' WITH (FORMAT csv, HEADER true)
+#   4. Click "Connect" next to "PostgreSQL Database"
+
+--------------------------------------------
+STEP 7: USE THE APPLICATION
+--------------------------------------------
+
+# The Executive Summary panel loads automatically once data is connected.
+# Click "Refresh" to regenerate it at any time.
+
+# Ask questions via the query box. Examples:
+#
+#   "Which branch had the lowest revenue last month?"
+#   "Compare average order value across all locations this quarter."
+#   "Which menu item is underperforming in Karachi but doing well in Lahore?"
+#   "Show revenue trend for LHR-01 over the last 8 weeks."
+#   "What's each branch's share of total revenue this month?"
+#   "Flag any branch where footfall dropped more than 20% week-over-week."
+
+--------------------------------------------
+STEP 8: PRODUCTION BUILD (optional)
+--------------------------------------------
+
+cd frontend
+npx vite build
+
+# Output is in frontend/dist/
+# Serve with any static file server, or use:
+
+cd frontend
+npx vite preview
+
+============================================
+  PROJECT FILE LIST (for reference)
+============================================
+
+BACKEND:
+  backend/requirements.txt      — Python dependencies
+  backend/.env.example          — Environment variable template
+  backend/main.py               — FastAPI app with all endpoints
+  backend/connectors.py         — CSV/DuckDB + PostgreSQL connectors
+  backend/insights.py           — NL-to-query and insight generation
+  backend/chart_rules.py        — Deterministic chart-type classifier
+  backend/executive.py          — Executive Summary engine
+
+FRONTEND:
+  frontend/package.json         — Node dependencies
+  frontend/vite.config.js       — Vite config with API proxy
+  frontend/tailwind.config.js   — Tailwind theme (minimalist-ui palette)
+  frontend/postcss.config.js    — PostCSS config
+  frontend/index.html           — Entry HTML (Google Fonts loaded here)
+  frontend/src/main.jsx         — React root mount
+  frontend/src/index.css        — Global styles + animations
+  frontend/src/App.jsx          — Main orchestrator component
+  frontend/src/lib/api.js       — API client (fetch wrappers)
+  frontend/src/lib/hooks.js     — IntersectionObserver scroll hooks
+  frontend/src/components/ExecutiveSummary.jsx
+  frontend/src/components/QueryBox.jsx
+  frontend/src/components/ResultFeed.jsx
+  frontend/src/components/KpiCard.jsx
+  frontend/src/components/BarChart.jsx
+  frontend/src/components/PieChart.jsx
+  frontend/src/components/LineChart.jsx
+  frontend/src/components/RankedTable.jsx
+  frontend/src/components/GeoHeatmap.jsx
+  frontend/src/components/EmptyState.jsx
+
+DATA:
+  dataset/orders.csv            — Sample orders (5090 rows, 6 branches)
+  dataset/footfall.csv          — Weekly footfall per branch
+  dataset/setup_postgres.sql    — PostgreSQL schema + load script
+
+DOCUMENTATION:
+  PRD_Final_Agent_Ready.md      — Product requirements
+  update.MD                     — Changelog and build log
+  execution.txt                 — This file
+
+============================================
+  TROUBLESHOOTING
+============================================
+
+PROBLEM: "No data source connected" error in query box
+FIX:    Upload a CSV or click Connect on PostgreSQL first.
+
+PROBLEM: Backend fails to start with ModuleNotFoundError
+FIX:    Run: pip install -r requirements.txt again.
+
+PROBLEM: "OPENAI_API_KEY not set" error
+FIX:    Add your key to backend/.env and restart the backend.
+
+PROBLEM: PostgreSQL connection fails
+FIX:    Verify host/port/credentials in backend/.env.
+        Test with: psql -h <host> -U <user> -d <db> -c "SELECT 1"
+
+PROBLEM: Frontend shows "thinking..." forever
+FIX:    Check backend terminal for errors.
+        Ensure OPENAI_API_KEY is valid and not rate-limited.
+
+PROBLEM: Chart renders but has no insight text
+FIX:    OpenAI API may be throttled. Retry the query.
