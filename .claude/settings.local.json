@@ -1,4 +1,11 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(npx vite *)",
+      "Bash(python create_pptx.py)",
+      "Bash(python -c \"from pptx import Presentation; prs = Presentation\\('Business_Analytics_Assistant_Presentation.pptx'\\); print\\(f'Slides: {len\\(prs.slides\\)}'\\); [print\\(f'  Slide {i+1}: {s.shapes.title.text if s.shapes.title else \\\\\"\\(no title placeholder\\)\\\\\"}'\\) for i, s in enumerate\\(prs.slides\\)]\")"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {
@@ -26,10 +33,5 @@
       }
     ]
   },
-  "description": "Impeccable design detector: immediate-tier checks after Edit/Write/MultiEdit on UI files, full-rule deep pass on Stop.",
-  "permissions": {
-    "allow": [
-      "Bash(npx vite *)"
-    ]
-  }
+  "description": "Impeccable design detector: immediate-tier checks after Edit/Write/MultiEdit on UI files, full-rule deep pass on Stop."
 }
